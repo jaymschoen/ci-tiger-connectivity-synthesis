@@ -1,0 +1,302 @@
+---
+title: "Central India Connectivity Synthesis"
+author: "Jay Schoen"
+editor_options: 
+  chunk_output_type: console
+---
+
+Notes
+
+  - Current analysis performed in Circuitscape 4.0 standalone GUI
+    	- Resistance rasters with raw values (after alignment and 250m projection)
+    	- PA node layer from Prachi + Kanha buffer + Panna buffer (no PA buffers besides Panna/Kanha) as node layer
+    	- Pairwise modeling mode
+	    - Cumulative pairwise curent flow option selected
+	    - Nodes left hot (not set to 0)
+
+```{r}
+library(sp)
+library(sf)
+library(raster)
+library(tidyverse)
+library(rgeos)
+library(rgdal)
+library(scales)
+```
+
+# Setup
+```{r}
+utm.44n <- "+init=epsg:3395"
+
+# All layers union shape
+tiger_lyrs_shp <- readOGR("spatial_layers/tiger_layers_shape.shp") 
+
+# PA shapefile
+PA_shp <- readOGR("Buffer node analysis/PA_node.shp") %>%
+  spTransform(utm.44n) 
+
+# Template raster
+template250 <- raster(resolution = c(250, 250), ext = extent(tiger_lyrs_shp), crs = utm.44n)
+# template1k <- raster(resolution = c(1000, 1000), ext = extent(tiger_lyrs_shp), crs = utm.44n)
+```
+
+# Functions used 
+```{r}
+## rasterRescale (from http://www.timassal.com/?p=859)
+rasterRescale<-function(r){
+  ((r-cellStats(r,"min"))/(cellStats(r,"max")-cellStats(r,"min")))
+}
+
+## Mode functions from Lucas Fortini (https://stackoverflow.com/questions/26726028/how-to-pick-the-most-frequent-values-mode-from-a-raster-stack)
+Mode <- function(x) {
+  ux <- unique(x)
+  ux=ux[!is.na(ux)]
+  ux[which.max(tabulate(match(x, ux)))]
+}
+Mode_count <- function(x) {
+  ux <- unique(x)    
+  ux=ux[!is.na(ux)]
+  mode=ux[which.max(tabulate(match(x, ux)))]
+  sum(x==mode, na.rm=T)
+}
+```
+
+
+
+# Notes
+  - All layers run in Circuitscape standalone GUI wth PA_node as node layer
+  - Nodes left hot (not set to 0), cumulative pairwise curent flow option selected
+  - Results imported below
+
+# Importing CS results
+```{r}
+## Masking CS results outside of individual study borders
+dutta_cur.raw <- raster("C:/CS_dutta250m_PA_node/CS_dutta250m_PA_node_cum_curmap.asc", 
+                        crs = utm.44n)
+mondal_cur.raw <- raster("C:/CS_mondal250m_PA_node/CS_mondal250m_PA_node_cum_curmap.asc", 
+                         crs = utm.44n)
+reddy_cur.raw <- raster("C:/CS_reddy250m_PA_node/CS_reddy250m_PA_node_cum_curmap.asc", 
+                        crs = utm.44n)
+thatte_cur.raw <- raster("C:/CS_thatte250m_PA_node/CS_thatte250m_PA_node_cum_curmap.asc", 
+                         crs = utm.44n)
+yumnam_cur.raw <- raster("C:/CS_yumnam250m_PA_node_nl/CS_yumnam250m_PA_node_nl_cum_curmap.asc", 
+                         crs = utm.44n)
+
+stack_cur.raw <- stack(dutta_cur.raw, mondal_cur.raw, reddy_cur.raw, 
+                       thatte_cur.raw, yumnam_cur.raw) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp) %>%
+  `names<-` (str_glue("{lyr_names}_cur"))
+
+plot(stack_cur.raw)
+hist(stack_cur.raw)
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+stack_cur.raw[stack_cur.raw > 12] <- NA # masking out nodes (only node areas were over 12)
+plot(stack_cur.raw)
+hist(stack_cur.raw)
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+# writeRaster(stack_cur.raw, file.path("analysis_final/cur/", names(stack_cur.raw)), bylayer = T, format = "GTiff", overwrite = T)
+
+
+# Importing TIFF Rasters 
+cur_list <- lapply(list.files("analysis_final/cur/", pattern = "_cur.tif", 
+                              all.files = TRUE, full.names = TRUE, ), raster)
+
+stack_cur <- stack(cur_list) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+plot(stack_cur)
+hist(stack_cur, xlab = "Current")
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+```
+
+## Scale/average
+```{r}
+stack_cur.scaled <- rasterRescale(stack_cur) %>%
+  `names<-` (str_glue("{names(stack_cur)}_scaled"))
+plot(stack_cur.scaled)
+hist(stack_cur.scaled)
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+cur.scaled_avg <- mean(stack_cur.scaled)
+plot(cur.scaled_avg, main = "Average Current (Scaled)")
+hist(cur.scaled_avg, main = "Scaled Average Current", xlab = "Current", breaks = 30, xlim = c(0,0.5))
+
+cur.scaled_cv <- calc(stack_cur.scaled, cv)
+plot(cur.scaled_cv, main = "CV of Avg Current (Scaled)")
+hist(cur.scaled_cv, main = "Scaled CV Current")
+
+## Exporting files for GIS
+# writeRaster(cur.scaled_avg, "analysis_final/cur/cur_scaled_avg.tif", overwrite = TRUE)
+# writeRaster(cur.scaled_cv, "analysis_final/cur/cur_scaled_cv.tif", overwrite = TRUE)
+
+## Import
+cur.scaled_avg <- raster("analysis_final/cur/cur_scaled_avg.tif")
+cur.scaled_cv <- raster("analysis_final/cur/cur_scaled_cv.tif")
+```
+
+### 20%ile CV
+```{r}
+  # Low 20%ile CV areas
+cur.cv_quant5 <- quantile(cur.scaled_cv, probs = seq(0,1,.2))
+cur.scaled_low.cv20 <- cur.scaled_cv
+cur.scaled_low.cv20[cur.scaled_low.cv20 > cur.cv_quant5[2]] <- NA
+plot(cur.scaled_low.cv20)
+
+cur.scaled_avg_low.cv20 <- mask(cur.scaled_avg, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_low.cv20)
+# writeRaster(cur.scaled_avg_low.cv20, "analysis_final/cur/cur_scaled_avg_low_cv20.tif")
+
+# Low 20%ile CV High Current 
+
+## >50%ile of current masked with <20%ile CV
+cur.avg_quant10 <- quantile(cur.scaled_avg, probs = seq(0,1,.1))
+cur.scaled_avg_high.cur50 <- cur.scaled_avg
+cur.scaled_avg_high.cur50[cur.scaled_avg_high.cur50 < cur.avg_quant10[6]] <- NA
+plot(cur.scaled_avg_high.cur50)
+cur.scaled_avg_high.cur50_low.cv20 <- mask(cur.scaled_avg_high.cur50, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur50_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur50, "analysis_final/cur/cur_scaled_avg_high_cur50.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur50_low.cv20, 
+#             "analysis_final/cur/cur_scaled_avg_high_cur50_low_cv20.tif")
+
+## >60%ile of current masked with <20%ile CV
+cur.scaled_avg_high.cur60 <- cur.scaled_avg
+cur.scaled_avg_high.cur60[cur.scaled_avg_high.cur60 < cur.avg_quant10[7]] <- NA
+plot(cur.scaled_avg_high.cur60)
+cur.scaled_avg_high.cur60_low.cv20 <- mask(cur.scaled_avg_high.cur60, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur60_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur60, "analysis_final/cur/cur_scaled_avg_high_cur60.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur60_low.cv20,
+#             "analysis_final/cur/cur_scaled_avg_high_cur60_low_cv20.tif")
+
+## >70%ile of current masked with <20%ile CV
+cur.scaled_avg_high.cur70 <- cur.scaled_avg
+cur.scaled_avg_high.cur70[cur.scaled_avg_high.cur70 < cur.avg_quant10[8]] <- NA
+plot(cur.scaled_avg_high.cur70)
+cur.scaled_avg_high.cur70_low.cv20 <- mask(cur.scaled_avg_high.cur70, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur70_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur70, "analysis_final/cur/cur_scaled_avg_high_cur70.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur70_low.cv20,
+#             "analysis_final/cur/cur_scaled_avg_high_cur70_low_cv20.tif")
+
+## >80%ile of current masked with <20%ile CV
+cur.scaled_avg_high.cur80 <- cur.scaled_avg
+cur.scaled_avg_high.cur80[cur.scaled_avg_high.cur80 < cur.avg_quant10[9]] <- NA
+plot(cur.scaled_avg_high.cur80)
+cur.scaled_avg_high.cur80_low.cv20 <- mask(cur.scaled_avg_high.cur80, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur80_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur80, "analysis_final/cur/cur_scaled_avg_high_cur80.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur80_low.cv20,
+#             "analysis_final/cur/cur_scaled_avg_high_cur80_low_cv20.tif")
+
+## >90%ile of current masked with <20%ile CV
+cur.scaled_avg_high.cur90 <- cur.scaled_avg
+cur.scaled_avg_high.cur90[cur.scaled_avg_high.cur90 < cur.avg_quant10[10]] <- NA
+plot(cur.scaled_avg_high.cur90)
+cur.scaled_avg_high.cur90_low.cv20 <- mask(cur.scaled_avg_high.cur90, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur90_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur90, "analysis_final/cur/cur_scaled_avg_high_cur90.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur90_low.cv20,
+#             "analysis_final/cur/cur_scaled_avg_high_cur90_low_cv20.tif")
+```
+
+### 50%ile CV
+```{r}
+# Low 50%ile CV areas
+cur.cv_quant2 <- quantile(cur.scaled_cv, probs = seq(0,1,.5))
+cur.scaled_low.cv50 <- cur.scaled_cv
+cur.scaled_low.cv50[cur.scaled_low.cv50 > cur.cv_quant2[2]] <- NA
+plot(cur.scaled_low.cv50)
+
+cur.scaled_avg_low.cv50 <- mask(cur.scaled_avg, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_low.cv50)
+# writeRaster(cur.scaled_avg_low.cv50, "analysis_final/cur/cur_scaled_avg_low_cv50.tif")
+
+## >60%ile of current masked with <50%ile CV
+cur.scaled_avg_high.cur60_low.cv50 <- mask(cur.scaled_avg_high.cur60, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_high.cur60_low.cv50)
+# writeRaster(cur.scaled_avg_high.cur60_low.cv50,
+#             "analysis_final/cur/cur_scaled_avg_high_cur60_low_cv50.tif")
+
+## >70%ile of current masked with <50%ile CV
+cur.scaled_avg_high.cur70_low.cv50 <- mask(cur.scaled_avg_high.cur70, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_high.cur70_low.cv50)
+# writeRaster(cur.scaled_avg_high.cur70_low.cv50,
+#             "analysis_final/cur/cur_scaled_avg_high_cur70_low_cv50.tif")
+
+## >80%ile of current masked with <50%ile CV
+cur.scaled_avg_high.cur80_low.cv50 <- mask(cur.scaled_avg_high.cur80, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_high.cur80_low.cv50)
+# writeRaster(cur.scaled_avg_high.cur80_low.cv50,
+#             "analysis_final/cur/cur_scaled_avg_high_cur80_low_cv50.tif")
+
+## >90%ile of current masked with <50%ile CV
+cur.scaled_avg_high.cur90_low.cv50 <- mask(cur.scaled_avg_high.cur90, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_high.cur90_low.cv50)
+# writeRaster(cur.scaled_avg_high.cur90_low.cv50,
+#             "analysis_final/cur/cur_scaled_avg_high_cur90_low_cv50.tif")
+
+```
+
+# Quantitative Analysis
+
+## Total CCA area
+
+```{r}
+cca_area <- as.numeric(length(cur.scaled_avg_high.cur70_low.cv20[!is.na(cur.scaled_avg_high.cur70_low.cv20)])) * 250*250/1000
+```
+
+
+## High current/high agreement overlap
+```{r}
+#20th %ile CV used for high agreement
+plot(cur.scaled_low.cv20)
+
+#70th %ile current
+low.cv20_high.cur70_mask <- mask(cur.scaled_low.cv20, cur.scaled_avg_high.cur70)
+plot(low.cv20_high.cur70_mask)
+
+length(low.cv20_high.cur70_mask[!is.na(low.cv20_high.cur70_mask)])/
+  length(cur.scaled_low.cv20[!is.na(cur.scaled_low.cv20)])
+
+
+# 80th %ile current
+low.cv20_high.cur80_mask <- mask(cur.scaled_low.cv20, cur.scaled_avg_high.cur80)
+plot(low.cv20_high.cur80_mask)
+
+length(low.cv20_high.cur80_mask[!is.na(low.cv20_high.cur80_mask)])/
+  length(cur.scaled_low.cv20[!is.na(cur.scaled_low.cv20)])
+
+plot(cur.scaled_avg_high.cur80)
+high.cur80_low.cv20_mask <- mask(cur.scaled_avg_high.cur80, cur.scaled_low.cv20)
+plot(high.cur80_low.cv20_mask)
+
+length(high.cur80_low.cv20_mask[!is.na(high.cur80_low.cv20_mask)])/
+  length(cur.scaled_avg_high.cur80[!is.na(cur.scaled_avg_high.cur80)])
+
+
+int_low.cv20_high.cur80 <- hull_low.cv20 %>%
+  crop(hull_high.cur80) %>%
+  mask(hull_high.cur80)
+plot(int_low.cv20_high.cur80)
+
+int_high.cur80_low.cv20 <- hull_high.cur80 %>%
+  crop(hull_low.cv20) %>%
+  mask(hull_low.cv20)
+plot(int_high.cur80_low.cv20)
+
+length(int_low.cv20_high.cur80[!is.na(int_low.cv20_high.cur80)])/
+  length(hull_low.cv20[!is.na(hull_low.cv20)])
+
+length(int_low.cv20_high.cur80[!is.na(int_low.cv20_high.cur80)])/
+  length(hull_low.cv20[!is.na(hull_low.cv20)])
+
+```

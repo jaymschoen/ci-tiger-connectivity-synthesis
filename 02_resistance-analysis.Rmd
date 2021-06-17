@@ -1,0 +1,284 @@
+---
+title: "Central India Connectivity Synthesis"
+author: "Jay Schoen"
+editor_options: 
+  chunk_output_type: console
+---
+
+Notes
+  - Layers projected to UTM 44N
+  
+  - Layers resampled (bilinear interpolation) to 250m resolution
+  
+  - Layers masked to union shape
+  
+  - Yumnam nightlight areas set to 1 for resistance analysis
+  
+
+```{r}
+library(sp)
+library(sf)
+library(raster)
+library(tidyverse)
+library(rgeos)
+library(rgdal)
+library(scales)
+```
+
+# Setup
+```{r}
+utm.44n <- "+init=epsg:3395"
+
+# All layers union shape
+tiger_lyrs_shp <- readOGR("spatial_layers/tiger_layers_shape.shp") 
+
+# PA shapefile
+PA_shp <- readOGR("Buffer node analysis/PA_node.shp") %>%
+  spTransform(utm.44n) 
+
+# Template raster
+template250 <- raster(resolution = c(250, 250), ext = extent(tiger_lyrs_shp), crs = utm.44n)
+# template1k <- raster(resolution = c(1000, 1000), ext = extent(tiger_lyrs_shp), crs = utm.44n)
+```
+
+# Functions used 
+```{r}
+## rasterRescale (from http://www.timassal.com/?p=859)
+rasterRescale<-function(r){
+  ((r-cellStats(r,"min"))/(cellStats(r,"max")-cellStats(r,"min")))
+}
+
+## Mode functions from Lucas Fortini (https://stackoverflow.com/questions/26726028/how-to-pick-the-most-frequent-values-mode-from-a-raster-stack)
+Mode <- function(x) {
+  ux <- unique(x)
+  ux=ux[!is.na(ux)]
+  ux[which.max(tabulate(match(x, ux)))]
+}
+Mode_count <- function(x) {
+  ux <- unique(x)    
+  ux=ux[!is.na(ux)]
+  mode=ux[which.max(tabulate(match(x, ux)))]
+  sum(x==mode, na.rm=T)
+}
+```
+
+# Importing rasters/adjusting Yumnam
+```{r}
+res_list <- lapply(list.files("analysis_final/res/", pattern = "res.tif", 
+                       all.files = TRUE, full.names = TRUE), raster)
+
+stack_res <- stack(res_list) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+plot(stack_res)
+
+# Modifying Yumnam layer for Resistance analysis
+## (setting nightlight areas (currently masked) == 1)
+yumnam.raw <- raster("DATA/JHALA/Resistance1/Resistance/resist_final/w001001.adf") 
+
+yumnam_res_nl1 <- yumnam.raw 
+yumnam_res_nl1[is.na(yumnam_res_nl1[])] <- 1 # Replacing NAs (nightlights) in Yumnam raster with 1
+yumnam_res_nl1 <- yumnam_res_nl1 %>%
+  projectRaster(template250) 
+yumnam_res_nl1[yumnam_res_nl1 >1] <- NA # removing erroneous >1 values left over from interpolation
+yumnam_res_nl1[yumnam_res_nl1 <=0] <- 1e-7 # recoding negative areas to 1e-7 (lowest resistance)
+
+stack_res[[5]] <- yumnam_res_nl1 %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp) %>%
+  `names<-` ("Yumnam_res")
+plot(stack_res)                               # Check: no holes in Yumnam layer
+# Visualizing distributions of rasters
+hist(stack_res, xlab = "Resistance", freq = F)
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+```
+
+# Scale & Average rasters
+```{r}
+stack_res.scaled <- rasterRescale(stack_res) %>%
+  `names<-` (str_glue("{names(stack_res)}_scaled"))
+plot(stack_res.scaled)
+hist(stack_res.scaled)                        # Check: histograms unchanged
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+## Mean Resistance Layer
+res.scaled_avg <- mean(stack_res.scaled)
+plot(res.scaled_avg, main = "Average Scaled")
+hist(res.scaled_avg, main = "Scaled Average", xlab = "Avg Resistance", breaks = 30)
+# writeRaster(res.scaled_avg, "Buffer node analysis/Resistance/Agreement/res.scaled_avg.tif")
+
+## Coefficient of Variation of Mean layer
+res.scaled_cv <- calc(stack_res.scaled, cv)
+plot(res.scaled_cv, main = "CV of Avg")
+hist(res.scaled_cv, main = "CV of Avg", xlab = "CV of Avg Resistance")
+# writeRaster(res.scaled_cv, "Buffer node analysis/Resistance/Agreement/res.scaled_cv.tif")
+
+
+## CV shows agreement between layers in high resistance areas, but variation in low resistance
+
+## Overall, very high variation in values between raster layers; need to discretize to draw meaningful conclusions
+```
+
+# Discretizing (5 categories)
+```{r}
+quant5_res <- t(quantile(stack_res, probs = seq(0,1,.2))) # quintiles
+
+# reclassifying values for cut function (need discrete cutoffs/lower minimums)
+quant5_res[1,] <- c(0.999, 0.0838757, 24.99167, 0.999, -0.01489998) ; 
+quant5_res [3,1] <- 100.999999
+quant5_res [c(2,4),4] <- c(1.000001, 4.999999)
+quant5_res[5,5] <- 0.999
+
+
+stack_res.disc5 = stack(lapply(names(stack_res), function(n)
+  cut(stack_res[[n]], breaks=quant5_res[,n])))
+names(stack_res.disc5) <- str_glue("{names(stack_res)}_discrete5")
+plot(stack_res.disc5)
+
+hist(stack_res.disc5, breaks = c(0:5)) # irregularities due to extremely skewed distributions
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+
+## Export
+# writeRaster(stack_res.disc5, file.path("analysis_final/res/", names(stack_res.disc5)), bylayer = T, format = "GTiff", overwrite = T)
+
+## Import
+res.disc5_list <- lapply(list.files("analysis_final/res/",
+                                    pattern = "discrete5.tif", all.files = TRUE, 
+                                    full.names = TRUE), raster)
+
+stack_res.disc5 <- stack(res.disc5_list) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+plot(stack_res.disc5)
+```
+
+## Mode analysis
+```{r}
+res_disc5.mode <- calc(stack_res.disc5, fun=Mode)
+plot(res_disc5.mode, main = "Mode Value")
+# writeRaster(res_disc5.mode, "analysis_final/res/res_disc5.mode.tif", overwrite = T)
+# 
+# res_disc5.sd <- calc(stack_res.disc5, sd)
+# plot(res_disc5.sd, main = "SD of Mode Value")
+# # writeRaster(res_disc5.sd, "analysis_final/res/res_disc5.sd.tif", overwrite = T)
+
+res_disc5.mode.freq <- calc(stack_res.disc5, fun=Mode_count) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+plot(res_disc5.mode.freq, main = "Frequency of mode value")
+
+res_disc5.perc.agree <- ((res_disc5.mode.freq/5) * 100) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+plot(res_disc5.perc.agree, main = "% Agreement on mode value")
+# writeRaster(res_disc5.perc.agree, "analysis_final/res/res_disc5.perc.agree.tif", overwrite = T)
+
+
+## Import
+# res_disc5.mode <- raster("analysis_final/res/res_disc5.mode.tif")
+# res_disc5.perc.agree <- raster("analysis_final/res/res_disc5.perc.agree.tif")
+```
+
+#### Plots
+```{r}
+# Quantiles + Agreement plot
+res_disc5.mode_data <- data.frame(quantile = as.factor(getValues(res_disc5.mode))) %>%
+  mutate(perc.agree = as.factor(getValues(res_disc5.perc.agree))) %>%
+  drop_na()
+
+plot_res_disc5.agree <- ggplot(data = res_disc5.mode_data, 
+                             aes(x = perc.agree, fill = quantile)) +
+  geom_bar(position = position_stack(reverse = TRUE)) + 
+  scale_fill_manual(values = c("steelblue", "green4", "yellow3", "orange3", "red3"), 
+                    labels = c("1: Low", "2: Med-Low", "3: Medium", "4: Med-High", "5: High"),
+                    name = "Resistance Quantile") +
+  theme_bw() + 
+  ggtitle("Resistance % Agreement by Quantile") +
+  ylab("# Pixels") +
+  xlab("% Agreement")
+
+plot(plot_res_disc5.agree)
+
+plot2_res_disc5.agree <- ggplot(data = res_disc5.mode_data, 
+                             aes(x = quantile, fill = perc.agree)) +
+  geom_bar(position = position_stack(reverse = TRUE)) + 
+  scale_fill_manual(values = c("red3", "orange2", "darkolivegreen4", "skyblue2", "blue4"),
+                    name = "% Agreement") +
+  theme_bw() + 
+  ggtitle("Resistance % Agreement by Quantile") +
+  ylab("# Pixels") +
+  xlab("Quantile")
+
+plot(plot2_res_disc5.agree)
+
+
+# ggsave(plot_res_disc5.agree, filename = "analysis_final/res/plot_res_disc5_agree.png", width = 7, height = 4, dpi = 300)
+# ggsave(plot2_res_disc5.agree, filename = "analysis_final/res/plot2_res_disc5_agree.png", width = 7, height = 4, dpi = 300)
+```
+
+### Agreement Layers
+```{r}
+# 60% or more agreement (High agreement)
+res_mask60 <- res_disc5.perc.agree %in% 60:100
+res_disc5.mode_agree.60 <- mask(res_disc5.mode, res_mask60, maskvalue = 0)
+plot(res_disc5.mode_agree.60)
+
+## Low resistance in >60% agreement
+low.res1_disc5_agree.60 <- res_disc5.mode_agree.60 %in% 1 %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+  
+low.res1_disc5_agree.60[low.res1_disc5_agree.60 !=1] <- NA
+plot(low.res1_disc5_agree.60)
+
+# writeRaster(low.res1_disc5_agree.60, "analysis_final/res/res_disc5_low1_agree.60.tif", overwrite = T)
+
+## High resistance in >60% agreement
+high.res1_disc5_agree.60 <- res_disc5.mode_agree.60 %in% 5 %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+
+high.res1_disc5_agree.60[high.res1_disc5_agree.60 !=1] <- NA
+plot(high.res1_disc5_agree.60)
+
+# writeRaster(high.res1_disc5_agree.60, "analysis_final/res/res_disc5_high1_agree.60.tif", overwrite = T)
+
+
+# 80% or more agreement (Very high agreement)
+res_mask80 <- res_disc5.perc.agree %in% 80:100
+res_disc5.mode_agree.80 <- mask(res_disc5.mode, res_mask80, maskvalue = 0)
+plot(res_disc5.mode_agree.80)
+# writeRaster(res_disc5.mode_agree.80, "analysis_final/res/res_disc5_mode_agree_80.tif", overwrite = T)
+
+
+## In QGIS, to create sieved shape file:
+      # imported low.res_agree file
+      # sieved at 10
+      # polygonized
+      # clipped to tiger_lyrs_shp
+      # selected all features == 1 (focal areas)
+      # saved as new shape file (low.res1_disc5_agree.60_sieve10.shp)
+```
+
+## Quantitative Analysis
+```{r}
+# High agreement summary table
+high_agree60 <- res_disc5.mode_data %>%
+  mutate(perc.agree = as.numeric(perc.agree)) %>%
+  filter(perc.agree >= 3) %>%
+  nrow() / nrow(res_disc5.mode_data)
+
+# Very high agreement summary table
+high_agree80 <- res_disc5.mode_data %>%
+  mutate(perc.agree = as.numeric(perc.agree)) %>%
+  filter(perc.agree >= 4) %>%
+  nrow() / nrow(res_disc5.mode_data)
+
+# Agreement by quantile table
+agree_by_quant <- res_disc5.mode_data %>% 
+  group_by(perc.agree, quantile) %>%
+  summarize(perc_quant = n()) %>%
+  group_by(perc.agree) %>%
+  mutate(prop = perc_quant/sum(perc_quant))
+```
