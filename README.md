@@ -8,7 +8,7 @@ Central India Tiger Connectivity Synthesis Project Notes
   
   - Layers masked to union shape
   
-  - Yumnam nightlight areas set to 1 for resistance analysis
+  - Yumnam et al. (2014) nightlight areas set to 1 for resistance analysis
   
   - Current analysis performed in Circuitscape 4.0 standalone GUI
     	- Resistance rasters with raw values (after alignment and 250m projection)
