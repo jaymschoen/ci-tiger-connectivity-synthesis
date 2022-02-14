@@ -23,6 +23,8 @@ library(tidyverse)
 library(rgeos)
 library(rgdal)
 library(scales)
+library(ggsci)
+library(ggthemes)
 ```
 
 # Setup
@@ -89,6 +91,7 @@ stack_res[[5]] <- yumnam_res_nl1 %>%
   `names<-` ("Yumnam_res")
 plot(stack_res)                               # Check: no holes in Yumnam layer
 # Visualizing distributions of rasters
+par(mfrow = c(1,5))
 hist(stack_res, xlab = "Resistance", freq = F)
 par(mfrow = c(1,1), mar = c(5,4,4,2))
 ```
@@ -119,22 +122,25 @@ hist(res.scaled_cv, main = "CV of Avg", xlab = "CV of Avg Resistance")
 ## Overall, very high variation in values between raster layers; need to discretize to draw meaningful conclusions
 ```
 
-# Discretizing (5 categories)
+# Discretizing (5 levels)
 ```{r}
 quant5_res <- t(quantile(stack_res, probs = seq(0,1,.2))) # quintiles
 
-# reclassifying values for cut function (need discrete cutoffs/lower minimums)
-quant5_res[1,] <- c(0.999, 0.0838757, 24.99167, 0.999, -0.01489998) ; 
-quant5_res [3,1] <- 100.999999
-quant5_res [c(2,4),4] <- c(1.000001, 4.999999)
+# reclassifying values for cut function (need discrete cutoffs/lower min bound to include minimum values)
+quant5_res[1,] <- c(0.999, 0.0838757, 24.99167, 0.999, 0) ; 
+quant5_res[3,1] <- 100.999999
+quant5_res[c(2,4),4] <- c(1.000001, 4.999999)
 quant5_res[5,5] <- 0.999
 
+quant5_res[c(1,4),4] <- c(0.999, 4.999999)
+quant5_res
 
 stack_res.disc5 = stack(lapply(names(stack_res), function(n)
   cut(stack_res[[n]], breaks=quant5_res[,n])))
 names(stack_res.disc5) <- str_glue("{names(stack_res)}_discrete5")
 plot(stack_res.disc5)
 
+par(mfrow = c(1,5))
 hist(stack_res.disc5, breaks = c(0:5)) # irregularities due to extremely skewed distributions
 par(mfrow = c(1,1), mar = c(5,4,4,2))
 
@@ -180,7 +186,7 @@ plot(res_disc5.perc.agree, main = "% Agreement on mode value")
 # res_disc5.perc.agree <- raster("analysis_final/res/res_disc5.perc.agree.tif")
 ```
 
-#### Plots
+#### Agreement/Quantile plots
 ```{r}
 # Quantiles + Agreement plot
 res_disc5.mode_data <- data.frame(quantile = as.factor(getValues(res_disc5.mode))) %>%
@@ -194,9 +200,9 @@ plot_res_disc5.agree <- ggplot(data = res_disc5.mode_data,
                     labels = c("1: Low", "2: Med-Low", "3: Medium", "4: Med-High", "5: High"),
                     name = "Resistance Quantile") +
   theme_bw() + 
-  ggtitle("Resistance % Agreement by Quantile") +
-  ylab("# Pixels") +
-  xlab("% Agreement")
+  # ggtitle("Resistance % Agreement by Quantile") +
+  ylab("Number of Pixels") +
+  xlab("Agreement (%)")
 
 plot(plot_res_disc5.agree)
 
@@ -213,9 +219,109 @@ plot2_res_disc5.agree <- ggplot(data = res_disc5.mode_data,
 plot(plot2_res_disc5.agree)
 
 
-# ggsave(plot_res_disc5.agree, filename = "analysis_final/res/plot_res_disc5_agree.png", width = 7, height = 4, dpi = 300)
+# ggsave(plot_res_disc5.agree, filename = "analysis_final/figures/fig3a.png", width = 7, height = 4, dpi = 300)
 # ggsave(plot2_res_disc5.agree, filename = "analysis_final/res/plot2_res_disc5_agree.png", width = 7, height = 4, dpi = 300)
 ```
+
+## Land Cover Analysis
+```{r}
+lc <- raster("spatial_layers/vegetation_typemap.img")
+# lc_250 <- projectRaster(lc, template250, method = "ngb") 
+# writeRaster(lc, "spatial_layers/vegetation_typemap.tif", overwrite = T)
+# writeRaster(lc_250, "spatial_layers/lc_250.tif", overwrite = T)
+
+lc_250 <- raster("spatial_layers/lc_250.tif")
+plot(lc_250)
+
+lc_data <- data.frame(lc@data@attributes) %>%
+  select(ID, COUNT, Class_Names) %>%
+  filter(COUNT>0)
+
+lc_250_data <- data.frame(ID = getValues(lc_250), 
+                          perc.agree = as.factor(getValues(res_disc5.perc.agree)),
+                          mode.quant = as.factor(getValues(res_disc5.mode))) %>%
+  drop_na()
+
+lc_top11 <- lc_250_data %>%             # 11/255 classes are at least 1% of total pixels
+  group_by(ID) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  slice(1:11) %>%
+  left_join(lc_data, by = "ID") %>%
+  # filter(Class_Names != "Agriculture") %>%
+  select(-COUNT) %>%
+  mutate(prop = count/sum(count),
+         Class_Names = factor(Class_Names, levels = .$Class_Names))
+
+plot_lc_top11 <- ggplot(lc_top11, aes(x = Class_Names, y = prop, fill = Class_Names)) +
+  geom_col() + 
+  scale_fill_tableau() +
+  theme_bw() +
+  ggtitle("Proportion of Landcover") +
+  xlab("Landcover Class") +
+  ylab("Proportion") +
+  scale_x_discrete(label=function(x) abbreviate(x, minlength=15)) +
+  theme(axis.text.x = element_text(angle = 15, vjust = .7))
+
+plot_lc_top11
+```
+
+### LC/Agreement plot
+```{r}
+res_lc_data1 <- lc_250_data %>%
+  left_join(lc_top11, by = "ID") %>%
+  filter(ID %in% lc_top11$ID)
+
+res_lc_data2 <- res_lc_data1 %>%
+  select(-count, -prop) %>%
+  mutate(count = 1) %>%
+  # filter(Class_Names != "Agriculture") %>%
+  group_by(perc.agree, Class_Names) %>%
+  summarise(count = sum(count)) %>%
+  mutate(prop.perc = count/sum(count)) %>%
+  ungroup() %>%
+  group_by(Class_Names) %>%
+  mutate(prop.class = count/sum(count)) %>%
+  ungroup() %>%
+  mutate(Class_Names = factor(Class_Names, levels = lc_top11$Class_Names))
+
+
+lc_agg <- res_lc_data1 %>%
+  mutate(Class_Names = recode(Class_Names, 
+                              'Sal' = "Forest",
+                              'Dry deciduous' = "Forest",
+                              'Teak mixed moist deciduous' = "Forest",
+                              'Moist deciduous' = "Forest",
+                              'Teak mixed dry deciduous' = "Forest",
+                              'Teak' = "Forest")) %>%
+  # filter(Class_Names != "Agriculture") %>%            ### to look at LC besides agriculture
+  select(-count, -prop) %>%
+  mutate(count = 1) %>%
+  group_by(perc.agree, Class_Names) %>%
+  summarise(count = sum(as.numeric(count))) %>%
+  group_by(perc.agree) %>%
+  mutate(prop.perc = count/sum(count)) %>%
+  ungroup() %>%
+  group_by(Class_Names) %>%
+  mutate(prop.class = count/sum(count))
+
+plot2_res_lc_agg.agree <- ggplot(data = lc_agg, 
+                             aes(x = perc.agree, y = prop.perc, fill = Class_Names)) +
+  geom_col(position = position_stack(reverse = TRUE)) + 
+  scale_fill_manual(values = c("grey50", "dark green", "yellow4", "orange4", "steel blue4", "red4"),
+                    name = "Landcover") +
+  theme_bw() + 
+  # ggtitle("Resistance % Agreement by LC") +
+  ylab("Proportion of Pixels") +
+  xlab("Agreement (%)")
+
+plot(plot2_res_lc_agg.agree)
+
+# ggsave(plot2_res_lc_agg.agree, filename = "analysis_final/figures/fig3b.png", width = 7, height = 4, dpi = 300)
+
+```
+
+
 
 ### Agreement Layers
 ```{r}
@@ -281,4 +387,71 @@ agree_by_quant <- res_disc5.mode_data %>%
   summarize(perc_quant = n()) %>%
   group_by(perc.agree) %>%
   mutate(prop = perc_quant/sum(perc_quant))
+```
+
+
+# Discretizing into 3,4,6 levels (for Appendix)
+```{r}
+quant4_res <- t(quantile(stack_res, probs = seq(0,1,.25))) # quartiles
+
+# reclassifying values for cut function (lower min bound to include minimum values)
+quant4_res[1,] <- c(0.999, 0.0838757, 24.99167, 0.999, 0)
+
+stack_res.disc4 = stack(lapply(names(stack_res), function(n)
+  cut(stack_res[[n]], breaks=quant4_res[,n])))
+names(stack_res.disc4) <- str_glue("{names(stack_res)}_discrete4")
+plot(stack_res.disc4)
+
+par(mfrow = c(1,5))
+hist(stack_res.disc4, breaks = c(0:4)) # irregularities due to extremely skewed distributions
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+
+## Export
+# writeRaster(stack_res.disc4, file.path("analysis_final/res/", names(stack_res.disc4)), bylayer = T, format = "GTiff", overwrite = T)
+```
+
+```{r}
+quant3_res <- t(quantile(stack_res, probs = seq(0,1,(1/3)))) # three levels
+
+# reclassifying values for cut function (need discrete cutoffs/lower minimums)
+quant3_res[1,] <- c(0.999, 0.0838757, 24.99167, 0.999, 0) ; 
+
+
+stack_res.disc3 = stack(lapply(names(stack_res), function(n)
+  cut(stack_res[[n]], breaks=quant3_res[,n])))
+names(stack_res.disc3) <- str_glue("{names(stack_res)}_discrete3")
+plot(stack_res.disc3)
+
+par(mfrow = c(1,5))
+hist(stack_res.disc3, breaks = c(0:3)) # irregularities due to extremely skewed distributions
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+
+## Export
+# writeRaster(stack_res.disc3, file.path("analysis_final/res/", names(stack_res.disc3)), bylayer = T, format = "GTiff", overwrite = T)
+```
+
+
+```{r}
+quant6_res <- t(quantile(stack_res, probs = seq(0,1,(1/6)))) # six levels
+
+# reclassifying values for cut function (need discrete cutoffs/lower minimums)
+quant6_res[1,] <- c(0.999, 0.0838757, 24.99167, 0.999, 0) ; 
+quant6_res [5,c(4,5)] <- c(4.99999, 0.999)
+quant6_res[5,5] <- 0.999
+
+
+stack_res.disc6 = stack(lapply(names(stack_res), function(n)
+  cut(stack_res[[n]], breaks=quant6_res[,n])))
+names(stack_res.disc6) <- str_glue("{names(stack_res)}_discrete6")
+plot(stack_res.disc6)
+
+par(mfrow = c(1,5))
+hist(stack_res.disc6, breaks = c(0:6)) # irregularities due to extremely skewed distributions
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+
+## Export
+# writeRaster(stack_res.disc6, file.path("analysis_final/res/", names(stack_res.disc6)), bylayer = T, format = "GTiff", overwrite = T)
 ```

@@ -1,0 +1,476 @@
+---
+title: "Central India Connectivity Synthesis"
+author: "Jay Schoen"
+editor_options: 
+  chunk_output_type: console
+---
+
+Notes
+
+  - Current analysis performed in Circuitscape 4.0 standalone GUI
+    	- Resistance rasters with raw values (after alignment and 250m projection)
+    	- PA node layer from Prachi + Kanha buffer + Panna buffer (no PA buffers besides Panna/Kanha) as node layer
+    	- Pairwise modeling mode
+	    - Cumulative pairwise curent flow option selected
+	    - Nodes left hot (not set to 0)
+	    
+	- Nodeless details
+	    - 130km ring buffer (20% of study extent (650 km wide))
+	    - 20 nodes randomly placed in perimeter
+	    - identical Circuitscape settings as above
+	    - buffer removed after Circuitscape
+
+```{r}
+library(sp)
+library(sf)
+library(raster)
+library(tidyverse)
+library(rgeos)
+library(rgdal)
+library(scales)
+```
+
+# Setup
+```{r}
+utm.44n <- "+init=epsg:3395"
+
+
+# All layers union shape
+tiger_lyrs_shp <- readOGR("spatial_layers/tiger_layers_shape.shp") 
+
+# Creating ring buffer
+ext_buffer <- buffer(tiger_lyrs_shp, 150000)
+plot(ext_buffer); plot(tiger_lyrs_shp, col = "grey", add = T);axis(1);axis(2)
+
+## Template raster
+template250 <- raster(resolution = c(250, 250), ext = extent(ext_buffer), crs = utm.44n)
+
+ext_buf_r <- rasterize(ext_buffer, template250)
+ext_buf_r[] <- rnorm(length(getValues(ext_buf_r)), mean = .5, sd = .1)
+plot(ext_buf_r)
+
+ring_buf <- gDifference(ext_buffer, tiger_lyrs_shp) 
+
+ring_buf_r <- ext_buf_r %>%
+  crop(ring_buf) %>%
+  mask(ring_buf)
+
+plot(ring_buf, add = T);axis(1);axis(2)
+
+plot(ring_buf_r)
+
+
+# Nodes
+## Imported from QGIS (easier than in R)
+##  - 20 random points in ring buffer, minimum 100 km apart
+
+ring_nodes <- readOGR("analysis_final/nodeless/ring_nodes.shp")
+ring_nodes@data$objectID <- 1:20
+ring_nodes_r <- rasterize(ring_nodes, ring_buf_r, field = "objectID")
+
+ring_nodes_r[!is.na(ring_nodes_r)]
+plot(ring_nodes_r)
+
+writeRaster(ring_nodes_r, "analysis_final/nodeless/ring_nodes.asc")
+```
+
+
+# Creating ring buffers
+
+Ring value rules
+  - random draw from normal distribution
+  - mean = median of layer
+  - sd = sd of layer
+  - constrained between min/max of original layer (to prevent <0 or very high values)
+
+```{r}
+
+## Importing/stacking aligned resistance rasters
+res_list <- lapply(list.files("analysis_final/res/", pattern = "res.tif", 
+                       all.files = TRUE, full.names = TRUE), raster)
+
+stack_res <- stack(res_list) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+plot(stack_res)
+
+
+# Visualizing distributions of rasters
+hist(stack_res, xlab = "Resistance", freq = F)
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+```
+
+## Dutta
+```{r}
+dutta <- stack_res[[1]]
+dutta_vals <- getValues(dutta) %>% as_tibble() %>% drop_na()
+dutta_vals <- dutta_vals$value
+dutta_max <- max(dutta_vals)
+dutta_min <- min(dutta_vals)
+
+dutta_rand <- rasterize(ext_buffer, ext_buf_r)
+dutta_rand[] <- rnorm(length(getValues(dutta_rand)), 
+                      mean = median(dutta_vals),
+                      sd = sd(dutta_vals))
+dutta_rand[dutta_rand<dutta_min] <- dutta_min
+dutta_rand[dutta_rand>dutta_max] <- dutta_max
+
+dutta_ring <- dutta_rand %>%
+  crop(ring_buf) %>%
+  mask(ring_buf)
+  
+plot(dutta_ring)
+
+dutta_res_nodeless <- terra::cover(dutta_ring, extend(dutta, dutta_ring))
+plot(dutta_res_nodeless, main = "Dutta et al.")
+```
+
+## Mondal
+```{r}
+mondal <- stack_res[[2]]
+mondal_vals <- getValues(mondal) %>% as_tibble() %>% drop_na()
+mondal_vals <- mondal_vals$value
+mondal_max <- max(mondal_vals)
+mondal_min <- min(mondal_vals)
+
+mondal_rand <- rasterize(ext_buffer, ext_buf_r)
+mondal_rand[] <- rnorm(length(getValues(mondal_rand)), 
+                      mean = median(mondal_vals),
+                      sd = sd(mondal_vals))
+mondal_rand[mondal_rand<mondal_min] <- mondal_min
+mondal_rand[mondal_rand>mondal_max] <- mondal_max
+
+mondal_ring <- mondal_rand %>%
+  crop(ring_buf) %>%
+  mask(ring_buf)
+  
+plot(mondal_ring)
+
+mondal_res_nodeless <- terra::cover(mondal_ring, extend(mondal, mondal_ring))
+plot(mondal_res_nodeless, main = "Mondal et al.")
+```
+
+## Reddy
+```{r}
+reddy <- stack_res[[3]]
+reddy_vals <- getValues(reddy) %>% as_tibble() %>% drop_na()
+reddy_vals <- reddy_vals$value
+reddy_max <- max(reddy_vals)
+reddy_min <- min(reddy_vals)
+
+reddy_rand <- rasterize(ext_buffer, ext_buf_r)
+reddy_rand[] <- rnorm(length(getValues(reddy_rand)), 
+                      mean = median(reddy_vals),
+                      sd = sd(reddy_vals))
+reddy_rand[reddy_rand<reddy_min] <- reddy_min
+reddy_rand[reddy_rand>reddy_max] <- reddy_max
+
+reddy_ring <- reddy_rand %>%
+  crop(ring_buf) %>%
+  mask(ring_buf)
+  
+plot(reddy_ring)
+
+reddy_res_nodeless <- terra::cover(reddy_ring, extend(reddy, reddy_ring))
+plot(reddy_res_nodeless, main = "Reddy et al.")
+```
+
+
+## Thatte
+```{r}
+thatte <- stack_res[[4]]
+thatte_vals <- getValues(thatte) %>% as_tibble() %>% drop_na()
+thatte_vals <- thatte_vals$value
+thatte_max <- max(thatte_vals)
+thatte_min <- min(thatte_vals)
+
+thatte_rand <- rasterize(ext_buffer, ext_buf_r)
+thatte_rand[] <- rnorm(length(getValues(thatte_rand)), 
+                      mean = median(thatte_vals),
+                      sd = sd(thatte_vals))
+thatte_rand[thatte_rand<thatte_min] <- thatte_min
+thatte_rand[thatte_rand>thatte_max] <- thatte_max
+
+thatte_ring <- thatte_rand %>%
+  crop(ring_buf) %>%
+  mask(ring_buf)
+  
+plot(thatte_ring)
+
+thatte_res_nodeless <- terra::cover(thatte_ring, extend(thatte, thatte_ring))
+plot(thatte_res_nodeless, main = "Thatte et al.")
+```
+
+## Yumnam
+```{r}
+yumnam <- stack_res[[5]]
+yumnam_vals <- getValues(yumnam) %>% as_tibble() %>% drop_na()
+yumnam_vals <- yumnam_vals$value
+yumnam_max <- max(yumnam_vals)
+yumnam_min <- min(yumnam_vals)
+
+yumnam_rand <- rasterize(ext_buffer, ext_buf_r)
+yumnam_rand[] <- rnorm(length(getValues(yumnam_rand)), 
+                      mean = median(yumnam_vals),
+                      sd = sd(yumnam_vals))
+yumnam_rand[yumnam_rand<yumnam_min] <- yumnam_min
+yumnam_rand[yumnam_rand>yumnam_max] <- yumnam_max
+
+yumnam_ring <- yumnam_rand %>%
+  crop(ring_buf) %>%
+  mask(ring_buf)
+  
+plot(yumnam_ring)
+
+yumnam_res_nodeless <- terra::cover(yumnam_ring, extend(yumnam, yumnam_ring))
+plot(yumnam_res_nodeless, main = "Yumnam et al.")
+```
+
+
+## Exporting for Circuitscape
+```{r}
+stack_res_nodeless <- stack(dutta_res_nodeless, mondal_res_nodeless, 
+                            reddy_res_nodeless, thatte_res_nodeless, yumnam_res_nodeless) %>%
+  `names<-` (c("Dutta_res_nodeless", "Mondal_res_nodeless", "Reddy_res_nodeless", 
+                 "Thatte_res_nodeless", "Yumnam_res_nodeless"))
+
+plot(stack_res_nodeless)
+
+writeRaster(stack_res_nodeless, file.path("analysis_final/nodeless/"),
+            names(stack_res_nodeless), bylayer = T, format = "ascii", overwrite = T)
+```
+
+
+# CS Notes
+  - All layers run in Circuitscape standalone GUI wth ring_nodes as node layer
+  - Ring buffer values randomly filled with mean = median of layer, sd = sd of layer
+  - Nodes left hot (not set to 0), cumulative pairwise curent flow option selected
+  - Results imported below
+
+# Importing CS results
+```{r}
+## Masking CS results outside of individual study borders
+dutta_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Dutta_cur_nodeless_cum_curmap.asc", 
+                        crs = utm.44n)
+mondal_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Mondal_cur_nodeless_cum_curmap.asc", 
+                         crs = utm.44n)
+reddy_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Reddy_cur_nodeless_cum_curmap.asc", 
+                        crs = utm.44n)
+thatte_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Thatte_cur_nodeless_cum_curmap.asc", 
+                         crs = utm.44n)
+yumnam_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Yumnam_cur_nodeless_cum_curmap.asc", 
+                         crs = utm.44n)
+
+stack_cur_ndls.raw <- stack(dutta_cur_ndls.raw, mondal_cur_ndls.raw, reddy_cur_ndls.raw, 
+                       thatte_cur_ndls.raw, yumnam_cur_ndls.raw) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp) %>%
+  `names<-` (str_replace(names(stack_res), "res", "cur_ndls"))
+
+plot(stack_cur_ndls.raw)
+hist(stack_cur_ndls.raw)
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+# writeRaster(stack_cur_ndls.raw, file.path("analysis_final/nodeless/", names(stack_cur_ndls.raw)), bylayer = T, format = "GTiff", overwrite = T)
+
+
+# Importing TIFF Rasters 
+cur_ndls_list <- lapply(list.files("analysis_final/nodeless/", pattern = "_cur_ndls.tif", 
+                              all.files = TRUE, full.names = TRUE, ), raster)
+
+stack_cur_ndls <- stack(cur_ndls_list) %>%
+  crop(tiger_lyrs_shp) %>%
+  mask(tiger_lyrs_shp)
+plot(stack_cur_ndls)
+hist(stack_cur_ndls, xlab = "Current")
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+```
+
+## Scale/average
+```{r}
+stack_cur_ndls.scaled <- rasterRescale(stack_cur_ndls) %>%
+  `names<-` (str_glue("{names(stack_cur_ndls)}_scaled"))
+plot(stack_cur_ndls.scaled)
+hist(stack_cur_ndls.scaled)
+par(mfrow = c(1,1), mar = c(5,4,4,2))
+
+cur_ndls.scaled_avg <- mean(stack_cur_ndls.scaled)
+plot(cur_ndls.scaled_avg, main = "Average Current (Scaled)")
+hist(cur_ndls.scaled_avg, main = "Scaled Average current", xlab = "current", breaks = 30, xlim = c(0,0.5))
+
+cur_ndls.scaled_cv <- calc(stack_cur_ndls.scaled, cv)
+plot(cur_ndls.scaled_cv, main = "CV of Avg current (Scaled)")
+hist(cur_ndls.scaled_cv, main = "Scaled CV current")
+
+## Exporting files for GIS
+# writeRaster(cur_ndls.scaled_avg, "analysis_final/nodeless/cur_ndls_scaled_avg.tif", overwrite = TRUE)
+# writeRaster(cur_ndls.scaled_cv, "analysis_final/nodeless/cur_ndls_scaled_cv.tif", overwrite = TRUE)
+
+## Import
+cur_ndls.scaled_avg <- raster("analysis_final/cur_ndls/cur_ndls_scaled_avg.tif")
+cur_ndls.scaled_cv <- raster("analysis_final/cur_ndls/cur_ndls_scaled_cv.tif")
+```
+
+### 20%ile CV
+```{r}
+# Low 20%ile CV areas
+cur_ndls.cv_quant5 <- quantile(cur_ndls.scaled_cv, probs = seq(0,1,.2))
+cur_ndls.scaled_low.cv20 <- cur_ndls.scaled_cv
+cur_ndls.scaled_low.cv20[cur_ndls.scaled_low.cv20 > cur_ndls.cv_quant5[2]] <- NA
+plot(cur_ndls.scaled_low.cv20)
+
+cur_ndls.scaled_avg_low.cv20 <- mask(cur_ndls.scaled_avg, cur_ndls.scaled_low.cv20, maskvalue = NA)
+plot(cur_ndls.scaled_avg_low.cv20)
+# writeRaster(cur_ndls.scaled_avg_low.cv20, "analysis_final/nodeless/cur_ndls_scaled_avg_low_cv20.tif")
+
+# Low 20%ile CV High Current 
+
+## >50%ile of current masked with <20%ile CV
+cur.avg_quant10 <- quantile(cur.scaled_avg, probs = seq(0,1,.1))
+cur.scaled_avg_high.cur50 <- cur.scaled_avg
+cur.scaled_avg_high.cur50[cur.scaled_avg_high.cur50 < cur.avg_quant10[6]] <- NA
+plot(cur.scaled_avg_high.cur50)
+cur.scaled_avg_high.cur50_low.cv20 <- mask(cur.scaled_avg_high.cur50, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur50_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur50, "analysis_final/cur/cur_scaled_avg_high_cur50.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur50_low.cv20, 
+#             "analysis_final/cur/cur_scaled_avg_high_cur50_low_cv20.tif")
+
+## >60%ile of current masked with <20%ile CV
+cur.scaled_avg_high.cur60 <- cur.scaled_avg
+cur.scaled_avg_high.cur60[cur.scaled_avg_high.cur60 < cur.avg_quant10[7]] <- NA
+plot(cur.scaled_avg_high.cur60)
+cur.scaled_avg_high.cur60_low.cv20 <- mask(cur.scaled_avg_high.cur60, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur60_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur60, "analysis_final/cur/cur_scaled_avg_high_cur60.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur60_low.cv20,
+#             "analysis_final/cur/cur_scaled_avg_high_cur60_low_cv20.tif")
+
+## >70%ile of current masked with <20%ile CV
+cur.scaled_avg_high.cur70 <- cur.scaled_avg
+cur.scaled_avg_high.cur70[cur.scaled_avg_high.cur70 < cur.avg_quant10[8]] <- NA
+plot(cur.scaled_avg_high.cur70)
+cur.scaled_avg_high.cur70_low.cv20 <- mask(cur.scaled_avg_high.cur70, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur70_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur70, "analysis_final/cur/cur_scaled_avg_high_cur70.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur70_low.cv20,
+#             "analysis_final/cur/cur_scaled_avg_high_cur70_low_cv20.tif")
+
+## >80%ile of current masked with <20%ile CV
+cur.scaled_avg_high.cur80 <- cur.scaled_avg
+cur.scaled_avg_high.cur80[cur.scaled_avg_high.cur80 < cur.avg_quant10[9]] <- NA
+plot(cur.scaled_avg_high.cur80)
+cur.scaled_avg_high.cur80_low.cv20 <- mask(cur.scaled_avg_high.cur80, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur80_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur80, "analysis_final/cur/cur_scaled_avg_high_cur80.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur80_low.cv20,
+#             "analysis_final/cur/cur_scaled_avg_high_cur80_low_cv20.tif")
+
+## >90%ile of current masked with <20%ile CV
+cur.scaled_avg_high.cur90 <- cur.scaled_avg
+cur.scaled_avg_high.cur90[cur.scaled_avg_high.cur90 < cur.avg_quant10[10]] <- NA
+plot(cur.scaled_avg_high.cur90)
+cur.scaled_avg_high.cur90_low.cv20 <- mask(cur.scaled_avg_high.cur90, cur.scaled_low.cv20, maskvalue = NA)
+plot(cur.scaled_avg_high.cur90_low.cv20)
+
+# writeRaster(cur.scaled_avg_high.cur90, "analysis_final/cur/cur_scaled_avg_high_cur90.tif", overwrite = T)
+# writeRaster(cur.scaled_avg_high.cur90_low.cv20,
+#             "analysis_final/cur/cur_scaled_avg_high_cur90_low_cv20.tif")
+```
+
+### 50%ile CV
+```{r}
+# Low 50%ile CV areas
+cur.cv_quant2 <- quantile(cur.scaled_cv, probs = seq(0,1,.5))
+cur.scaled_low.cv50 <- cur.scaled_cv
+cur.scaled_low.cv50[cur.scaled_low.cv50 > cur.cv_quant2[2]] <- NA
+plot(cur.scaled_low.cv50)
+
+cur.scaled_avg_low.cv50 <- mask(cur.scaled_avg, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_low.cv50)
+# writeRaster(cur.scaled_avg_low.cv50, "analysis_final/cur/cur_scaled_avg_low_cv50.tif")
+
+## >60%ile of current masked with <50%ile CV
+cur.scaled_avg_high.cur60_low.cv50 <- mask(cur.scaled_avg_high.cur60, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_high.cur60_low.cv50)
+# writeRaster(cur.scaled_avg_high.cur60_low.cv50,
+#             "analysis_final/cur/cur_scaled_avg_high_cur60_low_cv50.tif")
+
+## >70%ile of current masked with <50%ile CV
+cur.scaled_avg_high.cur70_low.cv50 <- mask(cur.scaled_avg_high.cur70, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_high.cur70_low.cv50)
+# writeRaster(cur.scaled_avg_high.cur70_low.cv50,
+#             "analysis_final/cur/cur_scaled_avg_high_cur70_low_cv50.tif")
+
+## >80%ile of current masked with <50%ile CV
+cur.scaled_avg_high.cur80_low.cv50 <- mask(cur.scaled_avg_high.cur80, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_high.cur80_low.cv50)
+# writeRaster(cur.scaled_avg_high.cur80_low.cv50,
+#             "analysis_final/cur/cur_scaled_avg_high_cur80_low_cv50.tif")
+
+## >90%ile of current masked with <50%ile CV
+cur.scaled_avg_high.cur90_low.cv50 <- mask(cur.scaled_avg_high.cur90, cur.scaled_low.cv50, maskvalue = NA)
+plot(cur.scaled_avg_high.cur90_low.cv50)
+# writeRaster(cur.scaled_avg_high.cur90_low.cv50,
+#             "analysis_final/cur/cur_scaled_avg_high_cur90_low_cv50.tif")
+
+```
+
+# Quantitative Analysis
+
+## Total CCA area (in sq km)
+
+```{r}
+cca_area <- as.numeric(length(cur.scaled_avg_high.cur70_low.cv20[!is.na(cur.scaled_avg_high.cur70_low.cv20)])) * 250*250/1e6
+```
+
+
+## High current/high agreement overlap
+```{r}
+#20th %ile CV used for high agreement
+plot(cur.scaled_low.cv20)
+
+#70th %ile current
+low.cv20_high.cur70_mask <- mask(cur.scaled_low.cv20, cur.scaled_avg_high.cur70)
+plot(low.cv20_high.cur70_mask)
+
+length(low.cv20_high.cur70_mask[!is.na(low.cv20_high.cur70_mask)])/
+  length(cur.scaled_low.cv20[!is.na(cur.scaled_low.cv20)])
+
+
+# 80th %ile current
+low.cv20_high.cur80_mask <- mask(cur.scaled_low.cv20, cur.scaled_avg_high.cur80)
+plot(low.cv20_high.cur80_mask)
+
+length(low.cv20_high.cur80_mask[!is.na(low.cv20_high.cur80_mask)])/
+  length(cur.scaled_low.cv20[!is.na(cur.scaled_low.cv20)])
+
+plot(cur.scaled_avg_high.cur80)
+high.cur80_low.cv20_mask <- mask(cur.scaled_avg_high.cur80, cur.scaled_low.cv20)
+plot(high.cur80_low.cv20_mask)
+
+length(high.cur80_low.cv20_mask[!is.na(high.cur80_low.cv20_mask)])/
+  length(cur.scaled_avg_high.cur80[!is.na(cur.scaled_avg_high.cur80)])
+
+
+int_low.cv20_high.cur80 <- hull_low.cv20 %>%
+  crop(hull_high.cur80) %>%
+  mask(hull_high.cur80)
+plot(int_low.cv20_high.cur80)
+
+int_high.cur80_low.cv20 <- hull_high.cur80 %>%
+  crop(hull_low.cv20) %>%
+  mask(hull_low.cv20)
+plot(int_high.cur80_low.cv20)
+
+length(int_low.cv20_high.cur80[!is.na(int_low.cv20_high.cur80)])/
+  length(hull_low.cv20[!is.na(hull_low.cv20)])
+
+length(int_low.cv20_high.cur80[!is.na(int_low.cv20_high.cur80)])/
+  length(hull_low.cv20[!is.na(hull_low.cv20)])
+
+```

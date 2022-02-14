@@ -248,10 +248,10 @@ plot(cur.scaled_avg_high.cur90_low.cv50)
 
 # Quantitative Analysis
 
-## Total CCA area
+## Total CCA area (in sq km)
 
 ```{r}
-cca_area <- as.numeric(length(cur.scaled_avg_high.cur70_low.cv20[!is.na(cur.scaled_avg_high.cur70_low.cv20)])) * 250*250/1000
+cca_area <- as.numeric(length(cur.scaled_avg_high.cur70_low.cv20[!is.na(cur.scaled_avg_high.cur70_low.cv20)])) * 250*250/1e6
 ```
 
 
