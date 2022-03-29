@@ -1,7 +1,7 @@
 ---
 title: "Central India Connectivity Synthesis"
 author: "Jay Schoen"
-editor_options: 
+editor_options:
   chunk_output_type: console
 ---
 
@@ -29,18 +29,19 @@ library(ggthemes)
 
 # Setup
 ```{r}
-utm.44n <- "+init=epsg:3395"
+# World Mercator projection
+merc <- "+init=epsg:3395"
 
 # All layers union shape
 tiger_lyrs_shp <- readOGR("spatial_layers/tiger_layers_shape.shp") 
 
 # PA shapefile
 PA_shp <- readOGR("Buffer node analysis/PA_node.shp") %>%
-  spTransform(utm.44n) 
+  spTransform(merc) 
 
 # Template raster
-template250 <- raster(resolution = c(250, 250), ext = extent(tiger_lyrs_shp), crs = utm.44n)
-# template1k <- raster(resolution = c(1000, 1000), ext = extent(tiger_lyrs_shp), crs = utm.44n)
+template250 <- raster(resolution = c(250, 250), ext = extent(tiger_lyrs_shp), crs = merc)
+# template1k <- raster(resolution = c(1000, 1000), ext = extent(tiger_lyrs_shp), crs = merc)
 ```
 
 # Functions used 
@@ -199,9 +200,11 @@ plot_res_disc5.agree <- ggplot(data = res_disc5.mode_data,
   scale_fill_manual(values = c("steelblue", "green4", "yellow3", "orange3", "red3"), 
                     labels = c("1: Low", "2: Med-Low", "3: Medium", "4: Med-High", "5: High"),
                     name = "Resistance Quantile") +
-  theme_bw() + 
+  # theme_bw() + 
+  theme(panel.background = element_rect(fill = NA, color = NA),
+        panel.grid = element_line(color = "gray90")) +
   # ggtitle("Resistance % Agreement by Quantile") +
-  ylab("Number of Pixels") +
+  ylab("Number of pixels") +
   xlab("Agreement (%)")
 
 plot(plot_res_disc5.agree)
@@ -219,7 +222,7 @@ plot2_res_disc5.agree <- ggplot(data = res_disc5.mode_data,
 plot(plot2_res_disc5.agree)
 
 
-# ggsave(plot_res_disc5.agree, filename = "analysis_final/figures/fig3a.png", width = 7, height = 4, dpi = 300)
+# ggsave(plot_res_disc5.agree, filename = "analysis_final/figures/fig3a.svg", width = 7, height = 4, dpi = 300)
 # ggsave(plot2_res_disc5.agree, filename = "analysis_final/res/plot2_res_disc5_agree.png", width = 7, height = 4, dpi = 300)
 ```
 
@@ -284,8 +287,10 @@ res_lc_data2 <- res_lc_data1 %>%
   mutate(prop.class = count/sum(count)) %>%
   ungroup() %>%
   mutate(Class_Names = factor(Class_Names, levels = lc_top11$Class_Names))
+```
 
-
+#### Aggregating classes
+```{r}
 lc_agg <- res_lc_data1 %>%
   mutate(Class_Names = recode(Class_Names, 
                               'Sal' = "Forest",
@@ -310,20 +315,22 @@ plot2_res_lc_agg.agree <- ggplot(data = lc_agg,
   geom_col(position = position_stack(reverse = TRUE)) + 
   scale_fill_manual(values = c("grey50", "dark green", "yellow4", "orange4", "steel blue4", "red4"),
                     name = "Landcover") +
-  theme_bw() + 
+  # theme_bw() + 
+  theme(panel.background = element_rect(fill = NA, color = NA),
+        panel.grid = element_line(color = "gray90")) +
   # ggtitle("Resistance % Agreement by LC") +
-  ylab("Proportion of Pixels") +
+  ylab("Proportion of pixels") +
   xlab("Agreement (%)")
 
 plot(plot2_res_lc_agg.agree)
 
-# ggsave(plot2_res_lc_agg.agree, filename = "analysis_final/figures/fig3b.png", width = 7, height = 4, dpi = 300)
+# ggsave(plot2_res_lc_agg.agree, filename = "analysis_final/figures/fig3b.svg", width = 7, height = 4, dpi = 300)
 
 ```
 
 
 
-### Agreement Layers
+## Agreement Layers
 ```{r}
 # 60% or more agreement (High agreement)
 res_mask60 <- res_disc5.perc.agree %in% 60:100

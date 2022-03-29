@@ -32,7 +32,8 @@ library(scales)
 
 # Setup
 ```{r}
-utm.44n <- "+init=epsg:3395"
+# World Mercator projection
+merc <- "+init=epsg:3395"
 
 
 # All layers union shape
@@ -43,7 +44,7 @@ ext_buffer <- buffer(tiger_lyrs_shp, 150000)
 plot(ext_buffer); plot(tiger_lyrs_shp, col = "grey", add = T);axis(1);axis(2)
 
 ## Template raster
-template250 <- raster(resolution = c(250, 250), ext = extent(ext_buffer), crs = utm.44n)
+template250 <- raster(resolution = c(250, 250), ext = extent(ext_buffer), crs = merc)
 
 ext_buf_r <- rasterize(ext_buffer, template250)
 ext_buf_r[] <- rnorm(length(getValues(ext_buf_r)), mean = .5, sd = .1)
@@ -251,15 +252,15 @@ writeRaster(stack_res_nodeless, file.path("analysis_final/nodeless/"),
 ```{r}
 ## Masking CS results outside of individual study borders
 dutta_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Dutta_cur_nodeless_cum_curmap.asc", 
-                        crs = utm.44n)
+                        crs = merc)
 mondal_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Mondal_cur_nodeless_cum_curmap.asc", 
-                         crs = utm.44n)
+                         crs = merc)
 reddy_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Reddy_cur_nodeless_cum_curmap.asc", 
-                        crs = utm.44n)
+                        crs = merc)
 thatte_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Thatte_cur_nodeless_cum_curmap.asc", 
-                         crs = utm.44n)
+                         crs = merc)
 yumnam_cur_ndls.raw <- raster("C:/CS_outputs/CI_tiger/nodeless/Yumnam_cur_nodeless_cum_curmap.asc", 
-                         crs = utm.44n)
+                         crs = merc)
 
 stack_cur_ndls.raw <- stack(dutta_cur_ndls.raw, mondal_cur_ndls.raw, reddy_cur_ndls.raw, 
                        thatte_cur_ndls.raw, yumnam_cur_ndls.raw) %>%
