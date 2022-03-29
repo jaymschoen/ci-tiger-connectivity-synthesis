@@ -11,8 +11,10 @@ Central India Tiger Connectivity Synthesis Project Notes
   - Yumnam et al. (2014) nightlight areas set to 1 for resistance analysis
   
   - Current analysis performed in Circuitscape 4.0 standalone GUI  
+  
+  Current Analysis Notes
     	- Resistance rasters with raw values (after alignment and 250m projection)
-    	- PA node layer from Prachi + Kanha buffer + Panna buffer (no PA buffers besides Panna/Kanha) as node layer
+    	- PA layer used as nodes (details in paper/supplementary information)
     	- Pairwise modeling mode
     	- Cumulative pairwise curent flow option selected
     	- Nodes left hot (not set to 0)
