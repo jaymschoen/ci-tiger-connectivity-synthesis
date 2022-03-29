@@ -2,7 +2,7 @@
 
 Central India Tiger Connectivity Synthesis Project Notes
 
-  - Layers projected to UTM 44N
+  - Layers projected to World Mercator (EPSG 3395)
   
   - Layers resampled (bilinear interpolation) to 250m resolution
   
