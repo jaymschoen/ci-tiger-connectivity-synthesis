@@ -12,7 +12,7 @@ Central India Tiger Connectivity Synthesis Project Notes
   
   - Current analysis performed in Circuitscape 4.0 standalone GUI  
   
-  Current Analysis Notes
+  - Current Analysis Notes
     	- Resistance rasters with raw values (after alignment and 250m projection)
     	- PA layer used as nodes (details in paper/supplementary information)
     	- Pairwise modeling mode
