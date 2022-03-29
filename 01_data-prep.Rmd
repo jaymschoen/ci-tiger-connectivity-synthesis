@@ -1,7 +1,8 @@
 ---
 title: "Central India Connectivity Synthesis"
 author: "Jay Schoen"
-editor_options: 
+output: pdf_document
+editor_options:
   chunk_output_type: console
 ---
 
@@ -44,7 +45,7 @@ yumnam.raw <- raster("DATA/JHALA/Resistance1/Resistance/resist_final/w001001.adf
 
 lyr_names <- c("Dutta", "Mondal", "Reddy", "Thatte", "Yumnam")
 
-# Projecting all rasters to UTM for Central India (44N), 250m res (using bilinear interpolation), tiger layers shape extent 
+# Projecting all rasters to World Mercator, 250m res (using bilinear interpolation), tiger layers shape extent 
 # Aligning and preparing rasters for stacking and further analysis
 dutta_res <- dutta.raw %>%
   projectRaster(template250) # bilinear interpolation is default method in "projectRaster"
