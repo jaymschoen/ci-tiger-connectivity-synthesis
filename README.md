@@ -1,6 +1,8 @@
-# ci-tiger-connectivity-synthesis
+# Central India Tiger Connectivity Synthesis
 
-Central India Tiger Connectivity Synthesis Project Notes
+Please see full publication [here](https://doi.org/10.1111/cobi.13909)
+
+Notes for analysis:
 
   - Layers projected to World Mercator (EPSG 3395)
   
